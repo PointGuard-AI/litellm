@@ -22,6 +22,7 @@ from litellm.types.proxy.guardrails.guardrail_hooks.qualifire import (
 )
 from litellm.types.proxy.guardrails.guardrail_hooks.litellm_content_filter import (
     ContentFilterCategoryConfig,
+)
 from litellm.types.proxy.guardrails.guardrail_hooks.tool_permission import (
     ToolPermissionGuardrailConfigModel,
 )
