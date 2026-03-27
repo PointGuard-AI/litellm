@@ -10,7 +10,7 @@ from litellm.llms.custom_httpx.http_handler import (
     get_async_httpx_client,
     httpxSpecialProvider,
 )
-from litellm.types.llms.openai import AllMessageValues
+from litellm.types.guardrails import GuardrailEventHooks, Mode
 from litellm.types.utils import GenericGuardrailAPIInputs
 
 if TYPE_CHECKING:
@@ -31,7 +31,9 @@ class PointGuardAIGuardrail(CustomGuardrail):
         policy_config_name: str,
         correlation_key: Optional[str] = None,
         guardrail_name: Optional[str] = None,
-        event_hook: Optional[Union[str, List[str]]] = None,
+        event_hook: Optional[
+            Union[GuardrailEventHooks, List[GuardrailEventHooks], Mode]
+        ] = None,
         default_on: bool = False,
         **kwargs,
     ):
@@ -41,19 +43,31 @@ class PointGuardAIGuardrail(CustomGuardrail):
 
         # Validate required parameters
         if not api_base:
-            raise HTTPException(status_code=401, detail="Missing required parameter: api_base")
+            raise HTTPException(
+                status_code=401, detail="Missing required parameter: api_base"
+            )
         if not api_key:
-            raise HTTPException(status_code=401, detail="Missing required parameter: api_key")
+            raise HTTPException(
+                status_code=401, detail="Missing required parameter: api_key"
+            )
         if not org_code:
-            raise HTTPException(status_code=401, detail="Missing required parameter: org_code")
+            raise HTTPException(
+                status_code=401, detail="Missing required parameter: org_code"
+            )
         if not policy_config_name:
-            raise HTTPException(status_code=401, detail="Missing required parameter: policy_config_name")
+            raise HTTPException(
+                status_code=401, detail="Missing required parameter: policy_config_name"
+            )
 
         self.pointguardai_api_base = api_base or os.getenv("POINTGUARDAI_API_URL_BASE")
         self.pointguardai_org_code = org_code or os.getenv("POINTGUARDAI_ORG_CODE", "")
-        self.pointguardai_policy_config_name = policy_config_name or os.getenv("POINTGUARDAI_CONFIG_NAME", "")
+        self.pointguardai_policy_config_name = policy_config_name or os.getenv(
+            "POINTGUARDAI_CONFIG_NAME", ""
+        )
         self.pointguardai_api_key = api_key or os.getenv("POINTGUARDAI_API_KEY", "")
-        self.pointguardai_correlation_key = correlation_key  # Optional parameter for request tracking
+        self.pointguardai_correlation_key = (
+            correlation_key  # Optional parameter for request tracking
+        )
 
         # Set default API base if not provided
         if not self.pointguardai_api_base:
@@ -63,41 +77,40 @@ class PointGuardAIGuardrail(CustomGuardrail):
                 self.pointguardai_api_base,
             )
 
-        # Construct v2 API endpoints
+        # Construct API endpoints
         base_url = self.pointguardai_api_base.rstrip("/")
         self.input_endpoint = f"{base_url}/aisec-rdc-v2/api/v1/orgs/{self.pointguardai_org_code}/inspect/input"
         self.output_endpoint = f"{base_url}/aisec-rdc-v2/api/v1/orgs/{self.pointguardai_org_code}/inspect/output"
-        
+
         verbose_proxy_logger.debug(
-            "PointGuardAI v2: Input endpoint: %s", self.input_endpoint
+            "PointGuardAI: Input endpoint: %s", self.input_endpoint
         )
         verbose_proxy_logger.debug(
-            "PointGuardAI v2: Output endpoint: %s", self.output_endpoint
+            "PointGuardAI: Output endpoint: %s", self.output_endpoint
         )
 
-        # Configure headers with API key only (email not required in v2)
         self.headers = {
             "X-appsoc-api-key": self.pointguardai_api_key,
             "Content-Type": "application/json",
         }
-        
+
         # store kwargs as optional_params
         self.optional_params = kwargs
 
         # Debug logging for configuration
         verbose_proxy_logger.debug(
-            "PointGuardAI v2: Configured with org_code: %s", self.pointguardai_org_code
+            "PointGuardAI: Configured with org_code: %s", self.pointguardai_org_code
         )
         verbose_proxy_logger.debug(
-            "PointGuardAI v2: Configured with policy_config_name: %s",
+            "PointGuardAI: Configured with policy_config_name: %s",
             self.pointguardai_policy_config_name,
         )
         verbose_proxy_logger.debug(
-            "PointGuardAI v2: Correlation key: %s",
+            "PointGuardAI: Correlation key: %s",
             self.pointguardai_correlation_key or "(auto-generated)",
         )
         verbose_proxy_logger.debug(
-            "PointGuardAI v2: API key configured: %s",
+            "PointGuardAI: API key configured: %s",
             "Yes" if self.pointguardai_api_key else "No",
         )
 
@@ -105,7 +118,7 @@ class PointGuardAIGuardrail(CustomGuardrail):
             guardrail_name=guardrail_name or GUARDRAIL_NAME,
             event_hook=event_hook,
             default_on=default_on,
-            **kwargs
+            **kwargs,
         )
 
     def transform_messages(self, messages: List[dict]) -> List[dict]:
@@ -128,7 +141,7 @@ class PointGuardAIGuardrail(CustomGuardrail):
     async def prepare_pointguard_ai_runtime_scanner_request(
         self, new_messages: List[dict], response_string: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """Prepare the request data for PointGuard AI v2 API"""
+        """Prepare the request data for PointGuardAI API"""
         try:
             # Validate required parameters
             if (
@@ -136,11 +149,10 @@ class PointGuardAIGuardrail(CustomGuardrail):
                 or not self.pointguardai_policy_config_name
             ):
                 verbose_proxy_logger.warning(
-                    "PointGuardAI v2: Missing required policy configuration parameters"
+                    "PointGuardAI: Missing required policy configuration parameters"
                 )
                 return None
 
-            # v2 API uses policyName instead of configName
             data: dict[str, Any] = {
                 "policyName": self.pointguardai_policy_config_name,
             }
@@ -152,7 +164,7 @@ class PointGuardAIGuardrail(CustomGuardrail):
             # Validate that we have either input messages or response string
             if not new_messages and not response_string:
                 verbose_proxy_logger.warning(
-                    "PointGuardAI v2: No input messages or response string provided"
+                    "PointGuardAI: No input messages or response string provided"
                 )
                 return None
 
@@ -168,162 +180,206 @@ class PointGuardAIGuardrail(CustomGuardrail):
                     data["input"] = new_messages
                 else:
                     verbose_proxy_logger.warning(
-                        "PointGuardAI v2: No input messages for input endpoint"
+                        "PointGuardAI: No input messages for input endpoint"
                     )
                     return None
 
-            verbose_proxy_logger.debug("PointGuardAI v2 request: %s", data)
+            verbose_proxy_logger.debug("PointGuardAI request: %s", data)
             return data
 
         except Exception as e:
             verbose_proxy_logger.error(
-                "Error preparing PointGuardAI v2 request: %s", str(e)
+                "Error preparing PointGuardAI request: %s", str(e)
             )
             return None
 
-    def _check_sections_present(self, response_data: dict, new_messages: List[dict], response_string: Optional[str]) -> tuple[bool, bool]:
+    def _check_sections_present(
+        self,
+        response_data: dict,
+        new_messages: List[dict],
+        response_string: Optional[str],
+    ) -> tuple[bool, bool]:
         """Check if input or output sections are present in response"""
-        input_section_present = (
-            bool(new_messages and len(new_messages) > 0 and
-                 response_data.get("input") is not None and
-                 response_data.get("input") != [] and
-                 response_data.get("input") != {})
+        input_section_present = bool(
+            new_messages
+            and len(new_messages) > 0
+            and response_data.get("input") is not None
+            and response_data.get("input") != []
+            and response_data.get("input") != {}
         )
 
-        output_section_present = (
-            bool(response_string and
-                 response_data.get("output") is not None and
-                 response_data.get("output") != [] and
-                 response_data.get("output") != {})
+        output_section_present = bool(
+            response_string
+            and response_data.get("output") is not None
+            and response_data.get("output") != []
+            and response_data.get("output") != {}
         )
 
         return input_section_present, output_section_present
 
-    def _extract_status_flags(self, response_data: dict, input_section_present: bool, output_section_present: bool) -> tuple[bool, bool, bool, bool]:
+    def _extract_status_flags(
+        self,
+        response_data: dict,
+        input_section_present: bool,
+        output_section_present: bool,
+    ) -> tuple[bool, bool, bool, bool]:
         """Extract blocking and modification flags from response"""
-        input_blocked = response_data.get("input", {}).get("blocked", False) if input_section_present else False
-        output_blocked = response_data.get("output", {}).get("blocked", False) if output_section_present else False
-        input_modified = response_data.get("input", {}).get("modified", False) if input_section_present else False
-        output_modified = response_data.get("output", {}).get("modified", False) if output_section_present else False
-        
+        input_blocked = (
+            response_data.get("input", {}).get("blocked", False)
+            if input_section_present
+            else False
+        )
+        output_blocked = (
+            response_data.get("output", {}).get("blocked", False)
+            if output_section_present
+            else False
+        )
+        input_modified = (
+            response_data.get("input", {}).get("modified", False)
+            if input_section_present
+            else False
+        )
+        output_modified = (
+            response_data.get("output", {}).get("modified", False)
+            if output_section_present
+            else False
+        )
+
         return input_blocked, output_blocked, input_modified, output_modified
 
-    def _extract_violations(self, response_data: dict, input_blocked: bool, output_blocked: bool) -> List[dict]:
-        """Extract violations from blocked sections in v2 format"""
+    def _extract_violations(
+        self, response_data: dict, input_blocked: bool, output_blocked: bool
+    ) -> List[dict]:
+        """Extract violations from blocked sections in format"""
         violations = []
-        
+
         # Helper function to extract from content items
         def extract_from_content(content_items: List[dict]) -> List[dict]:
             all_violations = []
             for content_item in content_items:
                 if not isinstance(content_item, dict):
                     continue
-                    
+
                 # Extract DLP violations
                 dlp_violations = content_item.get("dlpViolations", [])
                 for dlp in dlp_violations:
-                    all_violations.append({
-                        "type": "DLP",
-                        "name": dlp.get("name", "Unknown"),
-                        "dlp_data_type_id": dlp.get("dlpDataTypeId"),
-                        "action": dlp.get("action", "UNKNOWN"),
-                        "categories": dlp.get("categories", []),
-                        "match_count": dlp.get("matchCount", 0)
-                    })
-                
+                    all_violations.append(
+                        {
+                            "type": "DLP",
+                            "name": dlp.get("name", "Unknown"),
+                            "dlp_data_type_id": dlp.get("dlpDataTypeId"),
+                            "action": dlp.get("action", "UNKNOWN"),
+                            "categories": dlp.get("categories", []),
+                            "match_count": dlp.get("matchCount", 0),
+                        }
+                    )
+
                 # Extract AI violations
                 ai_violations = content_item.get("aiViolations", [])
                 for ai in ai_violations:
-                    all_violations.append({
-                        "type": "AI_THREAT",
-                        "name": ai.get("name", "Unknown"),
-                        "ai_threat_category_id": ai.get("aiThreatCategoryId"),
-                        "threat_type": ai.get("type", "UNKNOWN"),
-                        "action": ai.get("action", "UNKNOWN")
-                    })
+                    all_violations.append(
+                        {
+                            "type": "AI_THREAT",
+                            "name": ai.get("name", "Unknown"),
+                            "ai_threat_category_id": ai.get("aiThreatCategoryId"),
+                            "threat_type": ai.get("type", "UNKNOWN"),
+                            "action": ai.get("action", "UNKNOWN"),
+                        }
+                    )
             return all_violations
-        
+
         # Extract from input if blocked
         if input_blocked and "input" in response_data:
             input_content = response_data["input"].get("content", [])
             if isinstance(input_content, list):
                 violations.extend(extract_from_content(input_content))
-        
+
         # Extract from output if blocked
         if output_blocked and "output" in response_data:
             output_content = response_data["output"].get("content", [])
             if isinstance(output_content, list):
                 violations.extend(extract_from_content(output_content))
-        
+
         return violations
 
     def _create_violation_details(self, violations: List[dict]) -> List[dict]:
-        """Create detailed violation information for v2 format"""
+        """Create detailed violation information"""
         violation_details = []
         for violation in violations:
             if not isinstance(violation, dict):
                 continue
-                
+
             violation_type = violation.get("type", "UNKNOWN")
-            
+
             if violation_type == "DLP":
                 # DLP violation format
                 categories = violation.get("categories", [])
-                category_names = [cat.get("name", cat.get("code", "")) for cat in categories if isinstance(cat, dict)]
-                
-                violation_details.append({
-                    "type": "DLP",
-                    "name": violation.get("name", "Unknown DLP"),
-                    "action": violation.get("action", "UNKNOWN"),
-                    "categories": category_names,
-                    "match_count": violation.get("match_count", 0),
-                    "dlp_data_type_id": violation.get("dlp_data_type_id")
-                })
+                category_names = [
+                    cat.get("name", cat.get("code", ""))
+                    for cat in categories
+                    if isinstance(cat, dict)
+                ]
+
+                violation_details.append(
+                    {
+                        "type": "DLP",
+                        "name": violation.get("name", "Unknown DLP"),
+                        "action": violation.get("action", "UNKNOWN"),
+                        "categories": category_names,
+                        "match_count": violation.get("match_count", 0),
+                        "dlp_data_type_id": violation.get("dlp_data_type_id"),
+                    }
+                )
             elif violation_type == "AI_THREAT":
                 # AI threat violation format
-                violation_details.append({
-                    "type": "AI_THREAT",
-                    "name": violation.get("name", "Unknown Threat"),
-                    "threat_type": violation.get("threat_type", "UNKNOWN"),
-                    "action": violation.get("action", "UNKNOWN"),
-                    "ai_threat_category_id": violation.get("ai_threat_category_id")
-                })
+                violation_details.append(
+                    {
+                        "type": "AI_THREAT",
+                        "name": violation.get("name", "Unknown Threat"),
+                        "threat_type": violation.get("threat_type", "UNKNOWN"),
+                        "action": violation.get("action", "UNKNOWN"),
+                        "ai_threat_category_id": violation.get("ai_threat_category_id"),
+                    }
+                )
             else:
                 # Generic violation
                 violation_details.append(violation)
-        
+
         return violation_details
 
     def _handle_blocked_request(self, violation_details: List[dict]) -> None:
         """Handle blocked request by raising HTTPException"""
         error_message = "Content blocked by PointGuardAI policy"
-        
+
         verbose_proxy_logger.warning(
             "PointGuardAI blocking request with violations: %s", violation_details
         )
-        
+
         pointguardai_response = {
             "action": "block",
             "revised_prompt": None,
             "revised_response": error_message,
-            "explain_log": violation_details
+            "explain_log": violation_details,
         }
-        
+
         raise HTTPException(
             status_code=400,
             detail={
                 "error": "Violated PointGuardAI policy",
                 "pointguardai_response": pointguardai_response,
-            }
+            },
         )
 
-    def _handle_modifications(self, response_data: dict, input_modified: bool, output_modified: bool) -> Optional[List[dict]]:
-        """Handle content modifications in v2 format"""
+    def _handle_modifications(
+        self, response_data: dict, input_modified: bool, output_modified: bool
+    ) -> Optional[List[dict]]:
+        """Handle content modifications"""
         verbose_proxy_logger.info(
-            "PointGuardAI v2 modification detected - Input: %s, Output: %s", 
-            input_modified, output_modified
+            "PointGuardAI modification detected - Input: %s, Output: %s",
+            input_modified,
+            output_modified,
         )
-        
+
         # Extract modified content from content items
         # Returns items with originalContent and modifiedContent for comparison
         def extract_modified_content(content_items: List[dict]) -> List[dict]:
@@ -331,23 +387,25 @@ class PointGuardAIGuardrail(CustomGuardrail):
             for item in content_items:
                 if not isinstance(item, dict):
                     continue
-                
+
                 # Return with both original and modified content for apply_guardrail to use
-                modified_messages.append({
-                    "role": item.get("role", "user"),
-                    "originalContent": item.get("originalContent", ""),
-                    "modifiedContent": item.get("modifiedContent"),
-                })
-                
+                modified_messages.append(
+                    {
+                        "role": item.get("role", "user"),
+                        "originalContent": item.get("originalContent", ""),
+                        "modifiedContent": item.get("modifiedContent"),
+                    }
+                )
+
                 # Log if content was actually modified
                 if item.get("modifiedContent") is not None:
                     verbose_proxy_logger.info(
-                        "PointGuardAI v2: Content modified for role '%s'",
-                        item.get("role", "user")
+                        "PointGuardAI: Content modified for role '%s'",
+                        item.get("role", "user"),
                     )
-            
+
             return modified_messages
-        
+
         # Handle input modifications
         if input_modified and "input" in response_data:
             input_data = response_data["input"]
@@ -355,11 +413,11 @@ class PointGuardAIGuardrail(CustomGuardrail):
                 content_items = input_data.get("content", [])
                 if isinstance(content_items, list):
                     verbose_proxy_logger.info(
-                        "PointGuardAI v2 input modifications: %d items", 
-                        len(content_items)
+                        "PointGuardAI input modifications: %d items",
+                        len(content_items),
                     )
                     return extract_modified_content(content_items)
-        
+
         # Handle output modifications
         elif output_modified and "output" in response_data:
             output_data = response_data["output"]
@@ -367,35 +425,39 @@ class PointGuardAIGuardrail(CustomGuardrail):
                 content_items = output_data.get("content", [])
                 if isinstance(content_items, list):
                     verbose_proxy_logger.info(
-                        "PointGuardAI v2 output modifications: %d items", 
-                        len(content_items)
+                        "PointGuardAI output modifications: %d items",
+                        len(content_items),
                     )
                     return extract_modified_content(content_items)
-        
+
         return None
 
     def _handle_http_status_error(self, e: httpx.HTTPStatusError) -> None:
         """Handle HTTP status errors"""
         status_code = e.response.status_code
-        response_text = e.response.text if hasattr(e.response, 'text') else str(e)
-        
+        response_text = e.response.text if hasattr(e.response, "text") else str(e)
+
         verbose_proxy_logger.error(
             "PointGuardAI API HTTP error %s: %s",
             status_code,
             response_text,
         )
-        
+
         error_messages = {
             401: "PointGuardAI authentication failed: Invalid API credentials",
             400: "PointGuardAI bad request: Invalid configuration or parameters",
             403: "PointGuardAI access denied: Insufficient permissions",
-            404: "PointGuardAI resource not found: Invalid endpoint or organization"
+            404: "PointGuardAI resource not found: Invalid endpoint or organization",
         }
-        
-        detail = error_messages.get(status_code, f"PointGuardAI API error ({status_code}): {response_text}")
+
+        detail = error_messages.get(
+            status_code, f"PointGuardAI API error ({status_code}): {response_text}"
+        )
         raise HTTPException(status_code=status_code, detail=detail)
 
-    def _handle_network_errors(self, e: Union[httpx.ConnectError, httpx.TimeoutException, httpx.RequestError]) -> None:
+    def _handle_network_errors(
+        self, e: Union[httpx.ConnectError, httpx.TimeoutException, httpx.RequestError]
+    ) -> None:
         """Handle network-related errors"""
         if isinstance(e, httpx.TimeoutException):
             verbose_proxy_logger.error("PointGuardAI timeout error: %s", str(e))
@@ -416,17 +478,17 @@ class PointGuardAIGuardrail(CustomGuardrail):
         new_messages: List[dict],
         response_string: Optional[str] = None,
     ):
-        """Make the API request to PointGuardAI v2 API"""
+        """Make the API request to PointGuardAI API"""
         try:
             # Select appropriate endpoint based on whether we have output
             # pre_call mode: use input endpoint
             # post_call mode: use output endpoint
             if response_string:
                 endpoint = self.output_endpoint
-                verbose_proxy_logger.debug("PointGuardAI v2: Using output endpoint")
+                verbose_proxy_logger.debug("PointGuardAI: Using output endpoint")
             else:
                 endpoint = self.input_endpoint
-                verbose_proxy_logger.debug("PointGuardAI v2: Using input endpoint")
+                verbose_proxy_logger.debug("PointGuardAI: Using input endpoint")
 
             pointguardai_data = (
                 await self.prepare_pointguard_ai_runtime_scanner_request(
@@ -436,7 +498,7 @@ class PointGuardAIGuardrail(CustomGuardrail):
 
             if pointguardai_data is None:
                 verbose_proxy_logger.warning(
-                    "PointGuardAI v2: No data prepared for request"
+                    "PointGuardAI: No data prepared for request"
                 )
                 return None
 
@@ -449,7 +511,7 @@ class PointGuardAIGuardrail(CustomGuardrail):
             _json_data = json.dumps(pointguardai_data)
 
             verbose_proxy_logger.debug(
-                "PointGuardAI v2: Sending request to %s", endpoint
+                "PointGuardAI: Sending request to %s", endpoint
             )
 
             response = await self.async_handler.post(
@@ -459,10 +521,10 @@ class PointGuardAIGuardrail(CustomGuardrail):
             )
 
             verbose_proxy_logger.debug(
-                "PointGuardAI v2 response status: %s", response.status_code
+                "PointGuardAI response status: %s", response.status_code
             )
-            verbose_proxy_logger.debug("PointGuardAI v2 response: %s", response.text)
-            
+            verbose_proxy_logger.debug("PointGuardAI response: %s", response.text)
+
             # Raise HTTPStatusError for 4xx and 5xx responses
             response.raise_for_status()
 
@@ -471,40 +533,61 @@ class PointGuardAIGuardrail(CustomGuardrail):
                 try:
                     response_data = response.json()
                 except json.JSONDecodeError as e:
-                    verbose_proxy_logger.error("Failed to parse PointGuardAI response JSON: %s", e)
-                    raise HTTPException(status_code=500, detail="Invalid JSON response from PointGuardAI")
+                    verbose_proxy_logger.error(
+                        "Failed to parse PointGuardAI response JSON: %s", e
+                    )
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Invalid JSON response from PointGuardAI",
+                    )
 
                 # Check sections and extract status flags
-                input_section_present, output_section_present = self._check_sections_present(
-                    response_data, new_messages, response_string
+                input_section_present, output_section_present = (
+                    self._check_sections_present(
+                        response_data, new_messages, response_string
+                    )
                 )
-                input_blocked, output_blocked, input_modified, output_modified = self._extract_status_flags(
-                    response_data, input_section_present, output_section_present
+                input_blocked, output_blocked, input_modified, output_modified = (
+                    self._extract_status_flags(
+                        response_data, input_section_present, output_section_present
+                    )
                 )
 
                 verbose_proxy_logger.info(
                     "PointGuardAI API response analysis - Input: blocked=%s, modified=%s | Output: blocked=%s, modified=%s",
-                    input_blocked, input_modified, output_blocked, output_modified
+                    input_blocked,
+                    input_modified,
+                    output_blocked,
+                    output_modified,
                 )
-                verbose_proxy_logger.debug("PointGuardAI full response data: %s", response_data)
+                verbose_proxy_logger.debug(
+                    "PointGuardAI full response data: %s", response_data
+                )
 
                 # Priority rule: If both blocked=true AND modified=true, BLOCK takes precedence
                 if input_blocked or output_blocked:
                     verbose_proxy_logger.warning(
-                        "PointGuardAI blocked the request - Input blocked: %s, Output blocked: %s", 
-                        input_blocked, output_blocked
+                        "PointGuardAI blocked the request - Input blocked: %s, Output blocked: %s",
+                        input_blocked,
+                        output_blocked,
                     )
-                    
-                    violations = self._extract_violations(response_data, input_blocked, output_blocked)
+
+                    violations = self._extract_violations(
+                        response_data, input_blocked, output_blocked
+                    )
                     violation_details = self._create_violation_details(violations)
                     self._handle_blocked_request(violation_details)
 
                 # Check for modifications only if not blocked
                 elif input_modified or output_modified:
-                    return self._handle_modifications(response_data, input_modified, output_modified)
+                    return self._handle_modifications(
+                        response_data, input_modified, output_modified
+                    )
 
                 # No blocking or modification needed
-                verbose_proxy_logger.debug("PointGuardAI: No blocking or modifications required")
+                verbose_proxy_logger.debug(
+                    "PointGuardAI: No blocking or modifications required"
+                )
                 return None
 
         except HTTPException:
@@ -534,7 +617,7 @@ class PointGuardAIGuardrail(CustomGuardrail):
     ) -> GenericGuardrailAPIInputs:
         """
         Apply PointGuardAI guardrail to the given inputs using the unified guardrail system.
-        
+
         Args:
             inputs: Dictionary containing:
                 - texts: List of texts to check
@@ -542,23 +625,23 @@ class PointGuardAIGuardrail(CustomGuardrail):
             request_data: The original request data
             input_type: "request" for pre-call input validation, "response" for post-call output validation
             logging_obj: Optional logging object
-            
+
         Returns:
             GenericGuardrailAPIInputs - modified if content changes are applied
-            
+
         Raises:
             HTTPException: If content is blocked by PointGuardAI
         """
         texts = inputs.get("texts", [])
         structured_messages = inputs.get("structured_messages", [])
-        
+
         verbose_proxy_logger.debug(
             "PointGuardAI: apply_guardrail called with input_type=%s, texts=%d, structured_messages=%d",
             input_type,
             len(texts),
             len(structured_messages),
         )
-        
+
         if input_type == "request":
             # Pre-call: validate input messages
             return await self._apply_guardrail_on_request(
@@ -574,7 +657,7 @@ class PointGuardAIGuardrail(CustomGuardrail):
                 texts=texts,
                 request_data=request_data,
             )
-    
+
     async def _apply_guardrail_on_request(
         self,
         inputs: GenericGuardrailAPIInputs,
@@ -584,43 +667,45 @@ class PointGuardAIGuardrail(CustomGuardrail):
     ) -> GenericGuardrailAPIInputs:
         """Handle request-side (pre-call) guardrail checks for input messages."""
         # Use structured_messages if available, otherwise create from texts
-        messages = structured_messages if structured_messages else [
-            {"role": "user", "content": text} for text in texts
-        ]
-        
+        messages = (
+            structured_messages
+            if structured_messages
+            else [{"role": "user", "content": text} for text in texts]
+        )
+
         if not messages:
             return inputs
-        
+
         # Transform to PointGuardAI format
         new_messages = self.transform_messages(messages=messages)
-        
+
         # Make PointGuardAI API request (input only - no output)
         modified_content = await self.make_pointguard_api_request(
             request_data=request_data,
             new_messages=new_messages,
             response_string=None,
         )
-        
+
         # Apply modifications if present
         if modified_content and isinstance(modified_content, list):
             verbose_proxy_logger.info(
                 "PointGuardAI: Applying %d modifications to input",
-                len(modified_content)
+                len(modified_content),
             )
-            
+
             modifications_applied = False
-            
+
             # Modify the structured_messages or texts with string replacement
             for mod_item in modified_content:
                 if not isinstance(mod_item, dict):
                     continue
-                
+
                 original = mod_item.get("originalContent")
                 modified = mod_item.get("modifiedContent")
-                
+
                 if not original:
                     continue
-                
+
                 # Update structured messages if available
                 if structured_messages:
                     for msg in structured_messages:
@@ -634,7 +719,7 @@ class PointGuardAIGuardrail(CustomGuardrail):
                             verbose_proxy_logger.info(
                                 "PointGuardAI: Modified input message content"
                             )
-                
+
                 # Also update texts list
                 for i, text in enumerate(texts):
                     if original in text:
@@ -643,64 +728,74 @@ class PointGuardAIGuardrail(CustomGuardrail):
                         else:
                             texts[i] = text.replace(original, modified)
                         modifications_applied = True
-            
+
             if modifications_applied:
                 # Store the modified messages for post-call output validation
                 # Use the structured_messages (which have been modified) or create from texts
-                messages_to_store = structured_messages if structured_messages else [
-                    {"role": "user", "content": text} for text in texts
-                ]
-                self._store_input_messages_for_postprocessing(request_data, messages_to_store)
-                
+                messages_to_store = (
+                    structured_messages
+                    if structured_messages
+                    else [{"role": "user", "content": text} for text in texts]
+                )
+                self._store_input_messages_for_postprocessing(
+                    request_data, messages_to_store
+                )
+
                 return GenericGuardrailAPIInputs(
                     texts=texts,
                     structured_messages=structured_messages,
                 )
-        
+
         # Store original messages even if no modifications (for post-call validation)
         self._store_input_messages_for_postprocessing(request_data, messages)
-        
+
         return inputs
-    
-    def _store_input_messages_for_postprocessing(self, request_data: dict, messages: list) -> None:
+
+    def _store_input_messages_for_postprocessing(
+        self, request_data: dict, messages: list
+    ) -> None:
         """
         Store input messages in request metadata for post-call validation.
-        
+
         This allows the output guardrail to access the original (or modified) input messages
-        that were sent to the LLM, which is required by PointGuardAI v2 /inspect/output endpoint.
+        that were sent to the LLM, which is required by PointGuardAI /inspect/output endpoint.
         """
         # Store in metadata so it persists to post-call through user_api_key_dict
         if "metadata" not in request_data:
             request_data["metadata"] = {}
-        
+
         request_data["metadata"]["_pointguardai_input_messages"] = messages
-        
+
         verbose_proxy_logger.debug(
             "PointGuardAI: Stored %d input messages for post-call validation",
-            len(messages)
+            len(messages),
         )
-    
-    def _retrieve_input_messages_from_metadata(self, request_data: dict) -> Optional[List[dict]]:
+
+    def _retrieve_input_messages_from_metadata(
+        self, request_data: dict
+    ) -> Optional[List[dict]]:
         """
         Retrieve input messages stored during pre-call validation.
-        
+
         Checks both litellm_metadata (transformed from user_api_key_dict) and metadata fields.
         """
         # Try litellm_metadata first (post-call from handler)
-        messages = (request_data.get("litellm_metadata", {})
-                   .get("_pointguardai_input_messages"))
-        
+        messages = request_data.get("litellm_metadata", {}).get(
+            "_pointguardai_input_messages"
+        )
+
         # Fallback to metadata field (pre-call)
         if messages is None:
-            messages = (request_data.get("metadata", {})
-                       .get("_pointguardai_input_messages"))
-        
+            messages = request_data.get("metadata", {}).get(
+                "_pointguardai_input_messages"
+            )
+
         if messages:
             verbose_proxy_logger.debug(
                 "PointGuardAI: Retrieved %d stored input messages for output validation",
-                len(messages)
+                len(messages),
             )
-        
+
         return messages
 
     async def _apply_guardrail_on_response(
@@ -712,16 +807,16 @@ class PointGuardAIGuardrail(CustomGuardrail):
         """Handle response-side (post-call) guardrail checks for output."""
         if not texts:
             return inputs
-        
+
         # Get the output text (last text in the list)
         output_text = texts[-1] if texts else None
         if not output_text:
             return inputs
-        
+
         # For /output endpoint, we need both input and output
         # Try to retrieve the input messages stored during pre-call
         input_messages = self._retrieve_input_messages_from_metadata(request_data)
-        
+
         # If messages not found, use placeholder
         # NOTE: This happens when only output guardrail is configured without input guardrail.
         # The unified system doesn't preserve original messages during post-call.
@@ -732,38 +827,41 @@ class PointGuardAIGuardrail(CustomGuardrail):
                 "Using placeholder. For optimal validation, configure both input and output guardrails together."
             )
             input_messages = [
-                {"role": "user", "content": "[Input messages not available - configure input guardrail for full context]"}
+                {
+                    "role": "user",
+                    "content": "[Input messages not available - configure input guardrail for full context]",
+                }
             ]
         else:
             verbose_proxy_logger.info(
                 "PointGuardAI: Using %d stored input messages for output validation",
-                len(input_messages)
+                len(input_messages),
             )
-        
+
         # Make PointGuardAI API request with actual input and output
         modified_content = await self.make_pointguard_api_request(
             request_data=request_data,
             new_messages=input_messages,
             response_string=output_text,
         )
-        
+
         # Apply modifications to output if present
         if modified_content and isinstance(modified_content, list):
             verbose_proxy_logger.info(
                 "PointGuardAI: Applying %d modifications to output",
-                len(modified_content)
+                len(modified_content),
             )
-            
+
             # Start with the original output text
             modified_output = output_text
-            
+
             for mod_item in modified_content:
                 if not isinstance(mod_item, dict):
                     continue
-                
+
                 original = mod_item.get("originalContent")
                 modified = mod_item.get("modifiedContent")
-                
+
                 if original and original in modified_output:
                     # Apply string replacement for partial matches
                     if modified is None:
@@ -777,18 +875,19 @@ class PointGuardAIGuardrail(CustomGuardrail):
                         modified_output = modified_output.replace(original, modified)
                         verbose_proxy_logger.info(
                             "PointGuardAI: Masked sensitive content in output: '%s' -> '%s'",
-                            original[:50], modified[:50]
+                            original[:50],
+                            modified[:50],
                         )
-            
+
             # If any modifications were made, return updated texts
             if modified_output != output_text:
                 new_texts = texts.copy()
                 new_texts[-1] = modified_output
-                
+
                 return GenericGuardrailAPIInputs(
                     texts=new_texts,
                 )
-        
+
         return inputs
 
     @staticmethod
@@ -796,4 +895,5 @@ class PointGuardAIGuardrail(CustomGuardrail):
         from litellm.types.proxy.guardrails.guardrail_hooks.pointguardai import (
             PointGuardAIGuardrailConfigModel,
         )
+
         return PointGuardAIGuardrailConfigModel

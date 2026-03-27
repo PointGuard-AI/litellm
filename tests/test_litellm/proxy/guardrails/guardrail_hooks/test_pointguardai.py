@@ -2,7 +2,7 @@
 Unit tests for PointGuardAI guardrail integration.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -72,8 +72,7 @@ class TestPointGuardAIGuardrailInit:
         assert "policy_config_name" in str(exc_info.value.detail)
 
     def test_init_with_default_api_base(self):
-        """Test that default API base is set and path is appended."""
-        # When api_base is provided without the full path, it should append the path
+        """Test that endpoints are derived from the provided API base."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
             api_base="https://api.appsoc.com",
@@ -81,10 +80,15 @@ class TestPointGuardAIGuardrailInit:
             policy_config_name="test-policy",
         )
 
-        # Should append path to provided base
-        assert "https://api.appsoc.com" in guardrail.pointguardai_api_base
-        assert "/policies/inspect" in guardrail.pointguardai_api_base
-        assert guardrail.pointguardai_api_base.endswith("/policies/inspect")
+        assert guardrail.pointguardai_api_base == "https://api.appsoc.com"
+        assert (
+            guardrail.input_endpoint
+            == "https://api.appsoc.com/aisec-rdc-v2/api/v1/orgs/test-org/inspect/input"
+        )
+        assert (
+            guardrail.output_endpoint
+            == "https://api.appsoc.com/aisec-rdc-v2/api/v1/orgs/test-org/inspect/output"
+        )
 
     def test_init_with_custom_api_base(self):
         """Test initialization with custom API base URL."""
@@ -95,11 +99,12 @@ class TestPointGuardAIGuardrailInit:
             policy_config_name="test-policy",
         )
 
-        assert "https://custom.appsoc.com" in guardrail.pointguardai_api_base
-        assert "/policies/inspect" in guardrail.pointguardai_api_base
+        assert guardrail.pointguardai_api_base == "https://custom.appsoc.com"
+        assert guardrail.input_endpoint.startswith("https://custom.appsoc.com/")
+        assert guardrail.output_endpoint.startswith("https://custom.appsoc.com/")
 
     def test_init_with_org_code_template_replacement(self):
-        """Test that {{org}} template is replaced with org_code."""
+        """Test that derived endpoints include the configured org code."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
             api_base="https://api.appsoc.com",
@@ -107,12 +112,11 @@ class TestPointGuardAIGuardrailInit:
             policy_config_name="test-policy",
         )
 
-        # URL should have org_code filled in
-        assert "my-org-123" in guardrail.pointguardai_api_base
-        assert "{{org}}" not in guardrail.pointguardai_api_base
+        assert "my-org-123" in guardrail.input_endpoint
+        assert "my-org-123" in guardrail.output_endpoint
 
     def test_init_headers_configuration(self):
-        """Test that headers are correctly configured for v2 API."""
+        """Test that headers are correctly configured"""
         guardrail = PointGuardAIGuardrail(
             api_key="my_secret_key",
             api_base="https://api.appsoc.com",
@@ -131,7 +135,7 @@ class TestPointGuardAIGuardrailMessageTransformation:
         """Test transformation of messages with supported roles."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -153,7 +157,7 @@ class TestPointGuardAIGuardrailMessageTransformation:
         """Test that unsupported roles are converted to 'user'."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -175,7 +179,7 @@ class TestPointGuardAIGuardrailMessageTransformation:
         """Test that message content is preserved during transformation."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -199,7 +203,7 @@ class TestPointGuardAIGuardrailRequestPreparation:
         """Test request preparation with input messages only (pre_call)."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="my-policy",
         )
@@ -212,7 +216,7 @@ class TestPointGuardAIGuardrailRequestPreparation:
         )
 
         assert result is not None
-        assert result["configName"] == "my-policy"
+        assert result["policyName"] == "my-policy"
         assert "input" in result
         assert result["input"] == messages
         assert "output" not in result
@@ -222,7 +226,7 @@ class TestPointGuardAIGuardrailRequestPreparation:
         """Test request preparation with output only (post_call response)."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="my-policy",
         )
@@ -233,7 +237,8 @@ class TestPointGuardAIGuardrailRequestPreparation:
         )
 
         assert result is not None
-        assert result["configName"] == "my-policy"
+        assert result["policyName"] == "my-policy"
+        assert result["input"] == []
         assert "output" in result
         assert result["output"][0]["role"] == "assistant"
         assert result["output"][0]["content"] == "This is the response"
@@ -243,7 +248,7 @@ class TestPointGuardAIGuardrailRequestPreparation:
         """Test request preparation with both input and output."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="my-policy",
         )
@@ -262,15 +267,14 @@ class TestPointGuardAIGuardrailRequestPreparation:
         assert result["output"][0]["content"] == "Hi there!"
 
     @pytest.mark.asyncio
-    async def test_prepare_request_with_model_metadata(self):
-        """Test that model metadata is included when provided."""
+    async def test_prepare_request_with_correlation_key(self):
+        """Test that correlation key is included when provided."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="my-policy",
-            model_provider_name="openai",
-            model_name="gpt-4",
+            correlation_key="corr-123",
         )
 
         messages = [{"role": "user", "content": "Hello"}]
@@ -281,15 +285,14 @@ class TestPointGuardAIGuardrailRequestPreparation:
         )
 
         assert result is not None
-        assert result["modelProviderName"] == "openai"
-        assert result["modelName"] == "gpt-4"
+        assert result["correlationKey"] == "corr-123"
 
     @pytest.mark.asyncio
-    async def test_prepare_request_without_model_metadata(self):
-        """Test that model metadata is not included when not provided."""
+    async def test_prepare_request_without_correlation_key(self):
+        """Test that correlation key is omitted when not provided."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="my-policy",
         )
@@ -302,15 +305,14 @@ class TestPointGuardAIGuardrailRequestPreparation:
         )
 
         assert result is not None
-        assert "modelProviderName" not in result
-        assert "modelName" not in result
+        assert "correlationKey" not in result
 
     @pytest.mark.asyncio
     async def test_prepare_request_returns_none_for_empty_data(self):
         """Test that None is returned when no messages or response provided."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="my-policy",
         )
@@ -330,7 +332,7 @@ class TestPointGuardAIGuardrailResponseProcessing:
         """Test detection of input section in response."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -354,7 +356,7 @@ class TestPointGuardAIGuardrailResponseProcessing:
         """Test detection of output section in response."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -377,7 +379,7 @@ class TestPointGuardAIGuardrailResponseProcessing:
         """Test extraction of input blocked flag."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -403,7 +405,7 @@ class TestPointGuardAIGuardrailResponseProcessing:
         """Test extraction of output modified flag."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -429,7 +431,7 @@ class TestPointGuardAIGuardrailResponseProcessing:
         """Test extraction of violations from input section."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -439,10 +441,23 @@ class TestPointGuardAIGuardrailResponseProcessing:
                 "blocked": True,
                 "content": [
                     {
-                        "violations": [
-                            {"severity": "HIGH", "categories": ["pii"]},
-                            {"severity": "MEDIUM", "categories": ["toxic"]},
-                        ]
+                        "dlpViolations": [
+                            {
+                                "name": "credit-card",
+                                "dlpDataTypeId": "cc",
+                                "action": "BLOCK",
+                                "categories": [{"name": "pii"}],
+                                "matchCount": 1,
+                            }
+                        ],
+                        "aiViolations": [
+                            {
+                                "name": "prompt-injection",
+                                "aiThreatCategoryId": "threat-1",
+                                "type": "PROMPT_INJECTION",
+                                "action": "BLOCK",
+                            }
+                        ],
                     }
                 ],
             }
@@ -451,42 +466,50 @@ class TestPointGuardAIGuardrailResponseProcessing:
         violations = guardrail._extract_violations(response_data, True, False)
 
         assert len(violations) == 2
-        assert violations[0]["severity"] == "HIGH"
-        assert violations[1]["severity"] == "MEDIUM"
+        assert violations[0]["type"] == "DLP"
+        assert violations[1]["type"] == "AI_THREAT"
 
     def test_create_violation_details(self):
         """Test creation of violation detail objects."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
 
         violations = [
             {
-                "severity": "HIGH",
-                "scanner": "pii_scanner",
-                "inspector": "regex",
-                "categories": ["credit_card", "ssn"],
-                "confidenceScore": 0.95,
-                "mode": "BLOCKING",
-            }
+                "type": "DLP",
+                "name": "credit-card",
+                "action": "BLOCK",
+                "categories": [{"name": "credit_card"}, {"code": "ssn"}],
+                "match_count": 2,
+                "dlp_data_type_id": "cc",
+            },
+            {
+                "type": "AI_THREAT",
+                "name": "prompt-injection",
+                "threat_type": "PROMPT_INJECTION",
+                "action": "BLOCK",
+                "ai_threat_category_id": "threat-1",
+            },
         ]
 
         details = guardrail._create_violation_details(violations)
 
-        assert len(details) == 1
-        assert details[0]["severity"] == "HIGH"
-        assert details[0]["scanner"] == "pii_scanner"
+        assert len(details) == 2
+        assert details[0]["type"] == "DLP"
+        assert details[0]["name"] == "credit-card"
         assert details[0]["categories"] == ["credit_card", "ssn"]
-        assert details[0]["confidenceScore"] == 0.95
+        assert details[1]["type"] == "AI_THREAT"
+        assert details[1]["threat_type"] == "PROMPT_INJECTION"
 
     def test_handle_modifications_input(self):
         """Test handling of input modifications."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -518,7 +541,7 @@ class TestPointGuardAIGuardrailAPICall:
         """Test API call when no violations are detected."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -548,7 +571,7 @@ class TestPointGuardAIGuardrailAPICall:
         """Test API call when content is blocked."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -561,14 +584,12 @@ class TestPointGuardAIGuardrailAPICall:
                 "blocked": True,
                 "content": [
                     {
-                        "violations": [
+                        "aiViolations": [
                             {
-                                "severity": "HIGH",
-                                "scanner": "test",
-                                "inspector": "test",
-                                "categories": ["prohibited"],
-                                "confidenceScore": 0.95,
-                                "mode": "BLOCKING",
+                                "name": "prompt-injection",
+                                "aiThreatCategoryId": "threat-1",
+                                "type": "PROMPT_INJECTION",
+                                "action": "BLOCK",
                             }
                         ]
                     }
@@ -595,7 +616,7 @@ class TestPointGuardAIGuardrailAPICall:
         """Test API call when content is modified."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -635,7 +656,7 @@ class TestPointGuardAIGuardrailAPICall:
         """Test that correct headers are sent with API request."""
         guardrail = PointGuardAIGuardrail(
             api_key="my_secret_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -658,7 +679,7 @@ class TestPointGuardAIGuardrailAPICall:
 
         call_kwargs = guardrail.async_handler.post.call_args[1]
         assert call_kwargs["headers"]["X-appsoc-api-key"] == "my_secret_key"
-        assert call_kwargs["headers"]["X-appsoc-api-email"] == "admin@example.com"
+        assert "X-appsoc-api-email" not in call_kwargs["headers"]
 
 
 class TestPointGuardAIGuardrailApplyGuardrail:
@@ -669,7 +690,7 @@ class TestPointGuardAIGuardrailApplyGuardrail:
         """Test apply_guardrail for request input with no violations."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
             guardrail_name="pointguardai-guard",
@@ -703,7 +724,7 @@ class TestPointGuardAIGuardrailApplyGuardrail:
         """Test apply_guardrail for request that gets blocked."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
             guardrail_name="pointguardai-guard",
@@ -717,14 +738,12 @@ class TestPointGuardAIGuardrailApplyGuardrail:
                 "blocked": True,
                 "content": [
                     {
-                        "violations": [
+                        "aiViolations": [
                             {
-                                "severity": "HIGH",
-                                "scanner": "test",
-                                "inspector": "test",
-                                "categories": ["prohibited"],
-                                "confidenceScore": 0.95,
-                                "mode": "BLOCKING",
+                                "name": "prompt-injection",
+                                "aiThreatCategoryId": "threat-1",
+                                "type": "PROMPT_INJECTION",
+                                "action": "BLOCK",
                             }
                         ]
                     }
@@ -754,7 +773,7 @@ class TestPointGuardAIGuardrailApplyGuardrail:
         """Test apply_guardrail for request with content modification."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
             guardrail_name="pointguardai-guard",
@@ -799,7 +818,7 @@ class TestPointGuardAIGuardrailApplyGuardrail:
         """Test apply_guardrail for response with no violations."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
             guardrail_name="pointguardai-guard",
@@ -832,7 +851,7 @@ class TestPointGuardAIGuardrailApplyGuardrail:
         """Test apply_guardrail for response that gets blocked."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
             guardrail_name="pointguardai-guard",
@@ -846,14 +865,12 @@ class TestPointGuardAIGuardrailApplyGuardrail:
                 "blocked": True,
                 "content": [
                     {
-                        "violations": [
+                        "aiViolations": [
                             {
-                                "severity": "MEDIUM",
-                                "scanner": "test",
-                                "inspector": "test",
-                                "categories": ["sensitive"],
-                                "confidenceScore": 0.85,
-                                "mode": "BLOCKING",
+                                "name": "policy-violation",
+                                "aiThreatCategoryId": "threat-2",
+                                "type": "SENSITIVE_OUTPUT",
+                                "action": "BLOCK",
                             }
                         ]
                     }
@@ -882,7 +899,7 @@ class TestPointGuardAIGuardrailApplyGuardrail:
         """Test apply_guardrail for response with content modification."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
             guardrail_name="pointguardai-guard",
@@ -925,7 +942,7 @@ class TestPointGuardAIGuardrailApplyGuardrail:
         """Test that apply_guardrail extracts messages from request_data when not in inputs."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
             guardrail_name="pointguardai-guard",
@@ -964,7 +981,7 @@ class TestPointGuardAIGuardrailErrorHandling:
         """Test handling of 401 authentication error."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -996,7 +1013,7 @@ class TestPointGuardAIGuardrailErrorHandling:
         """Test handling of timeout error."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -1016,7 +1033,7 @@ class TestPointGuardAIGuardrailErrorHandling:
         """Test handling of connection error."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
         )
@@ -1039,7 +1056,7 @@ class TestPointGuardAIGuardrailShouldRun:
         """Test that guardrail runs when specified in metadata."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
             guardrail_name="pointguardai-guard",
@@ -1061,7 +1078,7 @@ class TestPointGuardAIGuardrailShouldRun:
         """Test that guardrail doesn't run when not specified in metadata."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
             guardrail_name="pointguardai-guard",
@@ -1083,7 +1100,7 @@ class TestPointGuardAIGuardrailShouldRun:
         """Test that guardrail runs when default_on is True."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
             guardrail_name="pointguardai-guard",
@@ -1105,7 +1122,7 @@ class TestPointGuardAIGuardrailShouldRun:
         """Test that guardrail doesn't run with mismatched event hook."""
         guardrail = PointGuardAIGuardrail(
             api_key="test_key",
-                        api_base="https://api.appsoc.com",
+            api_base="https://api.appsoc.com",
             org_code="test-org",
             policy_config_name="test-policy",
             guardrail_name="pointguardai-guard",
@@ -1137,21 +1154,21 @@ class TestPointGuardAIGuardrailConfigModel:
         assert PointGuardAIGuardrailConfigModel.ui_friendly_name() == "PointGuard AI"
 
     def test_config_model_fields(self):
-        """Test that config model has expected fields for v2 API."""
+        """Test that config model has expected fields for API."""
         from litellm.types.proxy.guardrails.guardrail_hooks.pointguardai import (
             PointGuardAIGuardrailConfigModel,
         )
 
         model = PointGuardAIGuardrailConfigModel()
 
-        # Check default values are None (v2 fields only)
+        # Check default values are None
         assert model.api_key is None
         assert model.org_code is None
         assert model.policy_config_name is None
         assert model.correlation_key is None
-                
+
     def test_config_model_with_values(self):
-        """Test config model with provided values for v2 API."""
+        """Test config model with provided values"""
         from litellm.types.proxy.guardrails.guardrail_hooks.pointguardai import (
             PointGuardAIGuardrailConfigModel,
         )
@@ -1167,7 +1184,7 @@ class TestPointGuardAIGuardrailConfigModel:
         assert model.org_code == "test-org"
         assert model.policy_config_name == "test-policy"
         assert model.correlation_key == "test-correlation-123"
-                
+
 
 class TestPointGuardAIGuardrailRegistry:
     """Tests for guardrail registry integration."""
