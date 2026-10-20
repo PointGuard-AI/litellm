@@ -393,4 +393,10 @@ export const GUARDRAIL_PRESETS: Record<string, GuardrailPreset> = {
     mode: ["pre_call", "post_call"],
     defaultOn: false,
   },
+  pointguardai: {
+    provider: "PointguardAi",
+    guardrailNameSuggestion: "PointGuard AI",
+    mode: "pre_call",
+    defaultOn: false,
+  },
 };

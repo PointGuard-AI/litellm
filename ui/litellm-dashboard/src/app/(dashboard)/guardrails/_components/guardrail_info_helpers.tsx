@@ -30,6 +30,7 @@ import straikerLogo from "../../../../../public/assets/logos/straiker.svg";
 import wingbackLogo from "../../../../../public/assets/logos/wingback.png";
 import xecguardLogo from "../../../../../public/assets/logos/xecguard.svg";
 import zscalerLogo from "../../../../../public/assets/logos/zscaler.svg";
+import pointguardAiLogo from "../../../../../public/assets/logos/pointguardai.png";
 
 // Legacy enum - keeping for backward compatibility
 export enum GuardrailProviders {
@@ -92,6 +93,7 @@ export const guardrail_provider_map: Record<string, string> = {
   "LLM Shield Proxy": "llm_shield_proxy",
   Conduct: "conduct",
   DecisionModel: "decision_model",
+  PointguardAi: "pointguard_ai",
 };
 
 // Search aliases matched alongside the provider label in the add-guardrail provider combobox
@@ -328,6 +330,7 @@ export const guardrailLogoMap = {
   Wingback: wingbackLogo.src,
   "Airia Guardrail": airiaLogo.src,
   "Decision Model": litellmLogo.src,
+  "PointGuard AI": pointguardAiLogo.src,
 } satisfies Record<string, string>;
 
 export const getGuardrailLogo = (displayName: string): string | undefined =>

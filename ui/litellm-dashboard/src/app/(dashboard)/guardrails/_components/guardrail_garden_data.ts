@@ -577,6 +577,16 @@ export const PARTNER_GUARDRAIL_CARDS: GuardrailCardInfo[] = [
     tags: ["Security", "Prompt Injection", "PII", "Secrets", "Redaction"],
     providerKey: "Airia",
   },
+  {
+    id: "pointguardai",
+    name: "PointGuard AI",
+    description:
+      "PointGuard AI runtime guardrails inspect prompts and responses for prompt injection, sensitive data exposure, harmful content, and policy violations.",
+    category: "partner",
+    logo: guardrailLogoMap["PointGuard AI"],
+    tags: ["Security", "Prompt Injection", "Data Protection", "Policy"],
+    providerKey: "PointguardAi",
+  },
 ];
 
 export const ALL_CARDS = [...LITELLM_CONTENT_FILTER_CARDS, ...DECISION_MODEL_CARDS, ...PARTNER_GUARDRAIL_CARDS];
